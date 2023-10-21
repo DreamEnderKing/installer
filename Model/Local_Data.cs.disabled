@@ -1,0 +1,109 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.Maui.Platform;
+using Newtonsoft.Json;
+
+namespace installer.Model
+{
+    class Local_Data
+    {
+        public string Path = "";      // 标记路径记录文件THUAI6.json的路径
+        public string FilePath = ""; // 最后一级为THUAI6文件夹所在目录
+        public string DataPath = "";  // C盘的文档文件夹
+        public Local_Data(string path)
+        {
+            DataPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            //DataPath = new DirectoryInfo(".").FullName;
+            Path = System.IO.Path.Combine(DataPath, "THUAI6.json");
+            if (File.Exists(Path))
+            {
+                Dictionary<string, string>? dict;
+                using (StreamReader r = new StreamReader(Path))
+                {
+                    string json = r.ReadToEnd();
+                    if (json == null || json == "")
+                    {
+                        json += @"{""THUAI6""" + ":" + @"""2023""}";
+                    }
+                    dict = Wrapped_Helper.TryDeserializeJson<Dictionary<string, string>>(json);
+                    if (dict != null && dict.ContainsKey("installpath"))
+                    {
+                        FilePath = dict["installpath"].Replace('\\', '/');
+                    }  //读取安装路径
+                }
+                dict?.TryAdd("installpath", @path);
+                using FileStream fs = new FileStream(Path, FileMode.Create, FileAccess.ReadWrite);
+                using StreamWriter sw = new StreamWriter(fs);
+                sw.Write(JsonConvert.SerializeObject(dict));
+                sw.Flush();
+            }
+            else
+            {
+                FilePath = System.IO.Path.GetDirectoryName(@path)
+                    ?? throw new Exception("Failed to get the path of the file");
+
+                //将dat文件写入程序运行路径
+                string json;
+                Dictionary<string, string>? dict;
+                using FileStream fs = new FileStream(Path, FileMode.Create, FileAccess.ReadWrite);
+                using (StreamReader r = new StreamReader(fs))
+                {
+                    json = r.ReadToEnd();
+                    if (json == null || json == "")
+                    {
+                        json += @"{""THUAI6""" + ":" + @"""2023""}";
+                    }
+                    dict = Wrapped_Helper.TryDeserializeJson<Dictionary<string, string>>(json);
+                    dict?.Add("installpath", path);
+                }
+                using FileStream fs2 = new FileStream(Path, FileMode.Create, FileAccess.ReadWrite);
+                using StreamWriter sw = new StreamWriter(fs2);
+                sw.Write(JsonConvert.SerializeObject(dict));
+                sw.Flush();
+            }
+        }
+
+        public static void ResetFilepath(string newPath)
+        {
+            string json;
+            Dictionary<string, string>? dict;
+            FilePath = newPath.Replace('\\', '/');
+            Path = System.IO.Path.Combine(DataPath, "THUAI6.json");
+            using FileStream fs = new FileStream(Path, FileMode.Create, FileAccess.ReadWrite);
+            using (StreamReader r = new StreamReader(fs))
+            {
+                json = r.ReadToEnd();
+                if (json == null || json == "")
+                {
+                    json += @"{""THUAI6""" + ":" + @"""2023""}";
+                }
+                dict = Wrapped_Helper.TryDeserializeJson<Dictionary<string, string>>(json);
+                if (dict != null && dict.ContainsKey("installpath"))
+                {
+                    dict["installpath"] = newPath;
+                }
+                else
+                {
+                    dict?.Add("installpath", newPath);
+                }
+                if (dict == null || !dict.ContainsKey("download"))
+                {
+                    dict?.Add("download", "true");
+                }
+                else
+                {
+                    dict["download"] = "true";
+                }
+            }
+            using FileStream fs2 = new FileStream(Path, FileMode.Open, FileAccess.ReadWrite);
+            using StreamWriter sw = new StreamWriter(fs2);
+            fs2.SetLength(0);
+            sw.Write(JsonConvert.SerializeObject(dict));
+            sw.Flush();
+        }
+
+    }
+}

@@ -1,0 +1,372 @@
+﻿using SceneKit;
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using static CoreFoundation.DispatchSource;
+
+namespace installer.Model
+{
+    public struct UpdateInfo                                         // 更新信息，包括新版本版本号、更改文件数和新文件数
+    {
+        public string status;
+        public int changedFileCount;
+        public int newFileCount;
+    }
+
+    public static class Downloader
+    {
+        #region 属性区
+        public static class UserInfo
+        {
+            public static string _id = "";
+            public static string email = "";
+        }
+        public static string ProgramName = "THUAI6";                     // 要运行或下载的程序名称
+        public static string PlayerFolder = "player";                    // 选手代码保存文件夹路径
+        public static string StartName = "maintest.exe";          // 启动的程序名
+        private static Local_Data Data = new Local_Data("");
+        private static Tencent_Cos Cloud = new Tencent_Cos();
+
+        private static HttpClient Client = new HttpClient();
+        private static EEsast Web = new EEsast();
+
+
+        static ConcurrentQueue<string> newFileName = new ConcurrentQueue<string>(); // 新文件名
+        static ConcurrentQueue<string> updateFileName = new ConcurrentQueue<string>();  // 更新文件名
+        static List<string> updateFailed = new List<string>();    //更新失败的文件名
+        static public List<string> UpdateFailed
+        {
+            get { return updateFailed; }
+        }
+        public static bool UpdatePlanned
+        {
+            get; set;
+        }
+
+        static public void ResetUpdateFailedInfo()
+        {
+            updateFailed.Clear();
+        }
+
+        private static int FileNum = 0;                                   // 总文件个数
+
+        public static string Route { get; set; } = Data.FilePath;
+        public static string Username { get; set; } = String.Empty;
+        public static string Password { get; set; } = String.Empty;
+        public static string CodeRoute { get; set; } = String.Empty;
+        public static string? Language { get; set; } = null;
+        public static string PlayerNum { get; set; } = "nSelect";
+        public enum LaunchLanguage { cpp, python };
+        public static LaunchLanguage launchLanguage { get; set; } = LaunchLanguage.cpp;
+        public enum UsingOS { Win, Linux, OSX };
+        public static UsingOS usingOS { get; set; } = ReadUsingOS();
+        public static class Updater
+        {
+            public static string Message;
+            public enum Status { newUser, menu, move, working, initializing, disconnected, error, successful, login, web, launch };
+            public static Status UpdateStatus;
+            public static bool Working { get; set; }
+            public static bool CombatCompleted { get => false; }
+            public static bool UploadReady { get; set; } = false;
+            public static bool ProfileAvailable { get; set; };
+        }
+        public static bool LoginFailed { get; set; } = false;
+        public static bool RememberMe { get; set; }
+
+        #endregion
+
+        #region 方法区
+
+        /// <summary>
+        /// save settings
+        /// </summary>
+        /// TO DO: 将这一部分从model移动（可能拆分）到ViewModel以避开对话框
+        public static bool Install()
+        {
+            if (Cloud.CheckAlreadyDownload())
+            {
+                MessageBoxResult repeatOption = MessageBox.Show($"文件已存在于{Downloader.Program.Data.FilePath},是否移动到新位置？", "重复安装", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                // ask if abort install, with warning sign, defalut move instead of abort;
+                if (repeatOption == MessageBoxResult.No)
+                {
+                    Route = Data.FilePath;
+                    return false;
+                }
+                else
+                {
+                    Cloud.MoveProgram(Route);
+                    return true;
+                }
+            }
+            else
+            {
+                Local_Data.ResetFilepath(Route);
+                Cloud.DownloadAll();
+                return true;
+            }
+        }
+        public static int Move()
+        {
+            int state = Cloud.MoveProgram(Route);
+            if (state != 0)
+                Route = Data.FilePath;
+            return state;
+
+        }
+
+        /// <summary>
+        /// 检查更新
+        /// </summary>
+        /// <returns></returns>
+        public static Updater.Status CheckUpdate()
+        {
+            UpdateInfo updateInfo = Cloud.Check(usingOS);
+            if (updateInfo.newFileCount == -1)
+            {
+                if (updateInfo.changedFileCount == -1)
+                {
+                    return Updater.Status.error;
+                }
+                else
+                {
+                    return Updater.Status.disconnected;
+                }
+            }
+            else
+            {
+                if (updateInfo.changedFileCount != 0 || updateInfo.newFileCount != 0)
+                {
+                    Updater.Message = $"{updateInfo.newFileCount}个新文件，{updateInfo.changedFileCount}个文件变化";
+                }
+                return Updater.Status.menu;
+            }
+        }
+
+        public static async Task<int> Login()
+        {
+            return await Web.LoginToEEsast(Client, Username, Password);
+        }
+
+        public static bool RememberUser()
+        {
+            int result = 0;
+            result |= Web.WriteJson("email", Username);
+            result |= Web.WriteJson("password", Password);
+            return result == 0;
+        }
+        public bool RecallUser()
+        {
+            var username = Web.ReadJson("email");
+            if (username == null || username.Equals(""))
+            {
+                Username = "";
+                return false;
+            }
+            Username = username;
+
+            var password = Web.ReadJson("password");
+            if (password == null || password.Equals(""))
+            {
+                Password = "";
+                return false;
+            }
+            Password = password;
+
+            return true;
+        }
+        public bool ForgetUser()
+        {
+            int result = 0;
+            result |= Web.WriteJson("email", "");
+            result |= Web.WriteJson("password", "");
+            return result == 0;
+        }
+
+        public bool Update()
+        {
+            try
+            {
+                return Cloud.Update();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        public int Uninst()
+        {
+            return Cloud.DeleteAll();
+        }
+
+        public bool Launch()
+        {
+            if (Cloud.CheckAlreadyDownload())
+            {
+                //Process.Start(System.IO.Path.Combine(Data.FilePath, startName));
+                switch (RunProgram.RunInfo.mode)
+                {
+                    case RunProgram.RunMode.ServerOnly:
+                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                            RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        break;
+                    case RunProgram.RunMode.ServerForDebugOnly:
+                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                            RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        break;
+                    case RunProgram.RunMode.GUIAttendGameOnly:
+                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID,
+                            false, RunProgram.RunInfo.occupation, RunProgram.RunInfo.type);
+                        break;
+                    case RunProgram.RunMode.GUIVisit:
+                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, 0, true, 1, 1);
+                        break;
+                    case RunProgram.RunMode.GUIAndAICpp:
+                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        Task.Delay(100);
+                        RunProgram.RunCpp(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
+                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
+                        RunProgram.RunInfo.playerId = null;
+                        RunProgram.RunInfo.filePath = null;
+                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID,
+                        false, RunProgram.RunInfo.occupation, RunProgram.RunInfo.type);
+                        break;
+                    case RunProgram.RunMode.GUIAndAIPython:
+                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        Task.Delay(100);
+                        RunProgram.RunPython(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
+                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
+                        RunProgram.RunInfo.playerId = null;
+                        RunProgram.RunInfo.filePath = null;
+                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID,
+                        false, RunProgram.RunInfo.occupation, RunProgram.RunInfo.type);
+                        break;
+                    case RunProgram.RunMode.ServerAndCpp:
+                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        Task.Delay(100);
+                        RunProgram.RunCpp(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
+                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
+                        RunProgram.RunInfo.playerId = null;
+                        RunProgram.RunInfo.filePath = null;
+                        break;
+                    case RunProgram.RunMode.ServerAndPython:
+                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        Task.Delay(100);
+                        RunProgram.RunPython(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
+                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
+                        RunProgram.RunInfo.playerId = null;
+                        RunProgram.RunInfo.filePath = null;
+                        break;
+                    case RunProgram.RunMode.ServerAndCppVisit:
+                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        Task.Delay(100);
+                        RunProgram.RunCpp(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
+                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
+                        RunProgram.RunInfo.playerId = null;
+                        RunProgram.RunInfo.filePath = null;
+                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID, true, 0, 1);
+                        break;
+                    case RunProgram.RunMode.ServerAndPythonVisit:
+                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        Task.Delay(100);
+                        RunProgram.RunPython(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
+                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
+                        RunProgram.RunInfo.playerId = null;
+                        RunProgram.RunInfo.filePath = null;
+                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID, true, 0, 1);
+                        break;
+                    case RunProgram.RunMode.ServerDebugAndCppVisit:
+                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        Task.Delay(100);
+                        RunProgram.RunCpp(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
+                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
+                        RunProgram.RunInfo.playerId = null;
+                        RunProgram.RunInfo.filePath = null;
+                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID, true, 0, 1);
+                        break;
+                    case RunProgram.RunMode.ServerDebugAndPythonVisit:
+                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
+                        Task.Delay(100);
+                        RunProgram.RunPython(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
+                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
+                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
+                        RunProgram.RunInfo.playerId = null;
+                        RunProgram.RunInfo.filePath = null;
+                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID, true, 0, 1);
+                        break;
+                }
+                return true;
+            }
+            else
+            {
+                MessageBox.Show($"文件还不存在，请安装主体文件", "文件不存在", MessageBoxButton.OK, MessageBoxImage.Warning, MessageBoxResult.OK);
+                return false;
+            }
+        }
+
+        public async Task<int> Upload()
+        {
+            switch (CodeRoute.Substring(CodeRoute.LastIndexOf('.') + 1))
+            {
+                case "cpp":
+                case "h":
+                    Language = "cpp";
+                    break;
+                case "py":
+                    Language = "python";
+                    break;
+                default:
+                    return -8;
+            }
+            if (PlayerNum.Equals("nSelect"))
+                return -9;
+            return await web.UploadFiles(client, CodeRoute, Language, PlayerNum);
+        }
+        public bool WriteUsingOS()
+        {
+            string OS = "";
+            switch (usingOS)
+            {
+                case UsingOS.Win:
+                    OS = "win";
+                    break;
+                case UsingOS.Linux:
+                    OS = "linux";
+                    break;
+                case UsingOS.OSX:
+                    OS = "osx";
+                    break;
+            }
+            return Web.WriteJson("OS", OS) == 0;
+        }
+        public UsingOS ReadUsingOS()
+        {
+            return Web.ReadJson("OS") switch
+            {
+                "linux" => UsingOS.Linux,
+                "osx" => UsingOS.OSX,
+                _ => UsingOS.Win,
+            };
+        }
+        #endregion
+    }
+
+
+}
