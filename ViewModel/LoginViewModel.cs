@@ -19,7 +19,7 @@ namespace installer.ViewModel
             set { txt1 = value; OnPropertyChanged(); }
         }
 
-        public ICommand BtnClickedCommand;
+        public ICommand BtnClickedCommand { get; }
 
         public LoginViewModel()
         {

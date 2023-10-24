@@ -43,7 +43,7 @@ namespace installer.Model
                                     throw new Exception("no token!");
                             logintoken = token;
                             SaveToken();
-                            var info = Wrapped_Helper.DeserializeJson1<Dictionary<string, string>>(await response.Content.ReadAsStringAsync());
+                            var info = Helper.DeserializeJson1<Dictionary<string, string>>(await response.Content.ReadAsStringAsync());
                             Downloader.UserInfo._id = info["_id"];
                             Downloader.UserInfo.email = info["email"];
                             break;
@@ -99,7 +99,7 @@ namespace installer.Model
                     {
                         case System.Net.HttpStatusCode.OK:
 
-                            var res = Utils.DeserializeJson1<Dictionary<string, string>>(await response.Content.ReadAsStringAsync());
+                            var res = Helper.DeserializeJson1<Dictionary<string, string>>(await response.Content.ReadAsStringAsync());
                             string appid = "1255334966";                    // 设置腾讯云账户的账户标识（APPID）
                             string region = "ap-beijing";                   // 设置一个默认的存储桶地域
                             CosXmlConfig config = new CosXmlConfig.Builder()
