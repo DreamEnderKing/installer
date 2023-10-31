@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 
@@ -55,5 +54,13 @@ namespace installer.Model
             }
         }
 
+        public static string ConvertAbsToRel(string basePath, string fullPath)
+        {
+            if (fullPath.StartsWith(basePath))
+            {
+                fullPath.Replace(basePath, ".");
+            }
+            return fullPath;
+        }
     }
 }

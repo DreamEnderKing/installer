@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http.Json;
@@ -19,53 +20,56 @@ namespace installer.Model
     class EEsast
     {
         public enum language { cpp, py };
-        public static string logintoken = "";
-        async public Task<int> LoginToEEsast(HttpClient client, string useremail, string password)
+        public string Token { get; protected set; }
+        public string ID { get; protected set; }
+        public string Email { get; protected set; }
+
+        public ConcurrentQueue<Exception> Exceptions = new ConcurrentQueue<Exception>();
+        public enum WebStatus
         {
-            string token = "";
+            disconnected, offline, logined
+        }
+        public WebStatus Status;
+        async public Task LoginToEEsast(HttpClient client, string useremail, string userpassword)
+        {
+            string token;
             try
             {
                 using (var response = await client.PostAsync("https://api.eesast.com/users/login", JsonContent.Create(new
                 {
                     email = useremail,
-                    password = password,
+                    password = userpassword,
                 })))
                 {
                     switch (response.StatusCode)
                     {
                         case System.Net.HttpStatusCode.OK:
-                            //Console.WriteLine("Success login");
-                            token = (System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStreamAsync(), typeof(LoginResponse), new JsonSerializerOptions()
-                            {
-                                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                            }) as LoginResponse)
-                                        ?.Token ??
-                                    throw new Exception("no token!");
-                            logintoken = token;
-                            SaveToken();
                             var info = Helper.DeserializeJson1<Dictionary<string, string>>(await response.Content.ReadAsStringAsync());
-                            Downloader.UserInfo._id = info["_id"];
-                            Downloader.UserInfo.email = info["email"];
+                            ID = info.Keys.Contains("_id") ? info["_id"] : string.Empty;
+                            Email = info.Keys.Contains("email") ? info["email"] : string.Empty;
+                            Token = info.Keys.Contains("token") ? info["token"] : string.Empty;
+                            Status = WebStatus.logined;
                             break;
-
                         default:
                             int code = ((int)response.StatusCode);
-                            //Console.WriteLine(code);
                             if (code == 401)
                             {
-                                //Console.WriteLine("邮箱或密码错误！");
-                                return -1;
+                                Exceptions.Enqueue(new Exception("邮箱或密码错误！"));
+                            }
+                            else
+                            {
+                                Exceptions.Enqueue(new Exception($"HTTP错误，错误码：{code}"));
                             }
                             break;
                     }
-                    return 0;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                return -2;
+                Exceptions.Enqueue(ex);
             }
         }
+
         /// <summary>
         /// 
         /// </summary>
