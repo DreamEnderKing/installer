@@ -8,6 +8,8 @@ using ICSharpCode.SharpZipLib.GZip;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
 using COSXML.Common;
+using COSXML.Transfer;
+using CoreGraphics;
 
 namespace installer.Model
 {
@@ -37,6 +39,17 @@ namespace installer.Model
             QCloudCredentialProvider cosCredentialProvider = new DefaultQCloudCredentialProvider(secretId, secretKey, durationSecond);
             // 初始化 CosXmlServer
             cosXml = new CosXmlServer(config, cosCredentialProvider);
+        }
+
+        public void UpdateSecret(QCloudCredentialProvider credential)
+        {
+            var config = new CosXmlConfig.Builder()
+            .IsHttps(true)      // 设置默认 HTTPS 请求
+            .SetAppid(Appid)    // 设置腾讯云账户的账户标识 APPID
+            .SetRegion(Region)  // 设置一个默认的存储桶地域
+            .SetDebugLog(true)  // 显示日志
+            .Build();           // 创建 CosXmlConfig 对象
+            cosXml = new CosXmlServer(config, credential);
         }
 
         public async Task DownloadFileAsync(string savePath, string remotePath = null)
@@ -119,6 +132,42 @@ namespace installer.Model
                 if (gzipStream != null) gzipStream.Close();
                 if (inStream != null) inStream.Close();
             }
+        }
+
+        public async Task UploadFileAsync(string localPath, string targetPath)
+        {
+            // 初始化 TransferConfig
+            TransferConfig transferConfig = new TransferConfig();
+
+            // 初始化 TransferManager
+            TransferManager transferManager = new TransferManager(cosXml, transferConfig);
+
+            string bucket = $"{BucketName}-{Appid}";
+
+            COSXMLUploadTask uploadTask = new COSXMLUploadTask(bucket, targetPath);
+
+            uploadTask.SetSrcPath(localPath);
+
+            uploadTask.progressCallback = delegate (long completed, long total)
+            {
+                //Console.WriteLine(string.Format("progress = {0:##.##}%", completed * 100.0 / total));
+            };
+
+            COSXMLUploadTask.UploadTaskResult result = await transferManager.UploadAsync(uploadTask);
+
+            try
+            {
+                COSXMLUploadTask.UploadTaskResult r = await transferManager.UploadAsync(uploadTask);
+                //Console.WriteLine(result.GetResultInfo());
+                string eTag = r.eTag;
+                //到这里应该是成功了，但是因为我没有试过，也不知道具体情况，可能还要根据result的内容判断
+            }
+            catch (Exception ex)
+            {
+                Exceptions.Push(ex);
+                throw;
+            }
+
         }
     }
 }

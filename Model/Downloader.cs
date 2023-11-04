@@ -88,7 +88,18 @@ namespace installer.Model
             Data = new Local_Data();
             Route = Data.InstallPath;
             Cloud = new Tencent_Cos("1314234950", "ap-beijing", "thuai6");
-            usingOS = ReadUsingOS();
+            Web.Token_Changed += SaveToken;
+            string temp;
+            if (Data.Config.TryGetValue("Remembered", out temp))
+            {
+                if (Convert.ToBoolean(temp))
+                {
+                    if (Data.Config.TryGetValue("Username", out temp))
+                        Username = temp;
+                    if (Data.Config.TryGetValue("Password", out temp))
+                        Password = temp;
+                }
+            }
         }
 
         public void UpdateMD5()
@@ -185,229 +196,49 @@ namespace installer.Model
         public async Task Login()
         {
             await Web.LoginToEEsast(Client, Username, Password);
-            Data.Config["Token"] = Web.Token;
+        }
+
+        public void SaveToken(object? sender, EventArgs args)  // 保存token
+        {
+            if (Data.Config.ContainsKey("Token"))
+                Data.Config["Token"] = Web.Token;
+            else
+                Data.Config.Add("Token", Web.Token);
             Data.SaveConfig();
         }
 
-        public bool RememberUser()
-        {
-            int result = 0;
-            result |= Web.WriteJson("email", Username);
-            result |= Web.WriteJson("password", Password);
-            return result == 0;
-        }
-        public bool RecallUser()
-        {
-            var username = Web.ReadJson("email");
-            if (username == null || username.Equals(""))
-            {
-                Username = "";
-                return false;
-            }
-            Username = username;
 
-            var password = Web.ReadJson("password");
-            if (password == null || password.Equals(""))
-            {
-                Password = "";
-                return false;
-            }
-            Password = password;
-
-            return true;
-        }
-        public bool ForgetUser()
+        public void RememberUser()
         {
-            int result = 0;
-            result |= Web.WriteJson("email", "");
-            result |= Web.WriteJson("password", "");
-            return result == 0;
-        }
-
-        public bool Update()
-        {
-            try
-            {
-                return Cloud.Update();
-            }
-            catch
-            {
-                return false;
-            }
-        }
-        public int Uninst()
-        {
-            return Cloud.DeleteAll();
-        }
-
-        public bool Launch()
-        {
-            if (Cloud.CheckAlreadyDownload())
-            {
-                //Process.Start(System.IO.Path.Combine(Data.InstallPath, startName));
-                switch (RunProgram.RunInfo.mode)
-                {
-                    case RunProgram.RunMode.ServerOnly:
-                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                            RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        break;
-                    case RunProgram.RunMode.ServerForDebugOnly:
-                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                            RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        break;
-                    case RunProgram.RunMode.GUIAttendGameOnly:
-                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID,
-                            false, RunProgram.RunInfo.occupation, RunProgram.RunInfo.type);
-                        break;
-                    case RunProgram.RunMode.GUIVisit:
-                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, 0, true, 1, 1);
-                        break;
-                    case RunProgram.RunMode.GUIAndAICpp:
-                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        Task.Delay(100);
-                        RunProgram.RunCpp(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
-                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
-                        RunProgram.RunInfo.playerId = null;
-                        RunProgram.RunInfo.filePath = null;
-                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID,
-                        false, RunProgram.RunInfo.occupation, RunProgram.RunInfo.type);
-                        break;
-                    case RunProgram.RunMode.GUIAndAIPython:
-                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        Task.Delay(100);
-                        RunProgram.RunPython(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
-                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
-                        RunProgram.RunInfo.playerId = null;
-                        RunProgram.RunInfo.filePath = null;
-                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID,
-                        false, RunProgram.RunInfo.occupation, RunProgram.RunInfo.type);
-                        break;
-                    case RunProgram.RunMode.ServerAndCpp:
-                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        Task.Delay(100);
-                        RunProgram.RunCpp(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
-                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
-                        RunProgram.RunInfo.playerId = null;
-                        RunProgram.RunInfo.filePath = null;
-                        break;
-                    case RunProgram.RunMode.ServerAndPython:
-                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        Task.Delay(100);
-                        RunProgram.RunPython(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
-                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
-                        RunProgram.RunInfo.playerId = null;
-                        RunProgram.RunInfo.filePath = null;
-                        break;
-                    case RunProgram.RunMode.ServerAndCppVisit:
-                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        Task.Delay(100);
-                        RunProgram.RunCpp(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
-                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
-                        RunProgram.RunInfo.playerId = null;
-                        RunProgram.RunInfo.filePath = null;
-                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID, true, 0, 1);
-                        break;
-                    case RunProgram.RunMode.ServerAndPythonVisit:
-                        RunProgram.StartServer(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        Task.Delay(100);
-                        RunProgram.RunPython(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
-                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
-                        RunProgram.RunInfo.playerId = null;
-                        RunProgram.RunInfo.filePath = null;
-                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID, true, 0, 1);
-                        break;
-                    case RunProgram.RunMode.ServerDebugAndCppVisit:
-                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        Task.Delay(100);
-                        RunProgram.RunCpp(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
-                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
-                        RunProgram.RunInfo.playerId = null;
-                        RunProgram.RunInfo.filePath = null;
-                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID, true, 0, 1);
-                        break;
-                    case RunProgram.RunMode.ServerDebugAndPythonVisit:
-                        RunProgram.StartServerForDebug(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.gameTimeSec, RunProgram.RunInfo.playbackFileName);
-                        Task.Delay(100);
-                        RunProgram.RunPython(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.studentCount,
-                        RunProgram.RunInfo.trickerCount, RunProgram.RunInfo.saveDebugLog, RunProgram.RunInfo.showDebugLog,
-                            RunProgram.RunInfo.warningOnly, RunProgram.RunInfo.playerId, RunProgram.RunInfo.filePath);
-                        RunProgram.RunInfo.playerId = null;
-                        RunProgram.RunInfo.filePath = null;
-                        RunProgram.RunGUIClient(RunProgram.RunInfo.IP, RunProgram.RunInfo.port, RunProgram.RunInfo.characterID, true, 0, 1);
-                        break;
-                }
-                return true;
-            }
+            if (Data.Config.ContainsKey("Username"))
+                Data.Config["Username"] = Username;
             else
-            {
-                //MessageBox.Show($"文件还不存在，请安装主体文件", "文件不存在", //MessageBoxButton.OK, //MessageBoxImage.Warning, //MessageBoxResult.OK);
-                return false;
-            }
-        }
+                Data.Config.Add("Username", Username);
 
-        public async Task<int> Upload()
-        {
-            switch (CodeRoute.Substring(CodeRoute.LastIndexOf('.') + 1))
-            {
-                case "cpp":
-                case "h":
-                    Language = "cpp";
-                    break;
-                case "py":
-                    Language = "python";
-                    break;
-                default:
-                    return -8;
-            }
-            if (PlayerNum.Equals("nSelect"))
-                return -9;
-            return await web.UploadFiles(client, CodeRoute, Language, PlayerNum);
-        }
-        public bool WriteUsingOS()
-        {
-            string OS = "";
-            switch (usingOS)
-            {
-                case UsingOS.Win:
-                    OS = "win";
-                    break;
-                case UsingOS.Linux:
-                    OS = "linux";
-                    break;
-                case UsingOS.OSX:
-                    OS = "osx";
-                    break;
-            }
-            return Web.WriteJson("OS", OS) == 0;
-        }
-        public UsingOS ReadUsingOS()
-        {
-            return Web.ReadJson("OS") switch
-            {
-                "linux" => UsingOS.Linux,
-                "osx" => UsingOS.OSX,
-                _ => UsingOS.Win,
-            };
-        }
+            if (Data.Config.ContainsKey("Password"))
+                Data.Config["Password"] = Password;
+            else
+                Data.Config.Add("Password", Password);
 
-        public void GetNewHash()
+            if (Data.Config.ContainsKey("Remembered"))
+                Data.Config["Remembered"] = "true";
+            else
+                Data.Config.Add("Remembered", "true");
+
+            Data.SaveConfig();
+        }
+        public void ForgetUser()
         {
-            Cloud.Download(System.IO.Path.Combine(Data.InstallPath, "hash.json"), "hash.json");
+            if (Data.Config.ContainsKey("Remembered"))
+                Data.Config["Remembered"] = "false";
+
+            if (Data.Config.ContainsKey("Username"))
+                Data.Config["Username"] = string.Empty;
+
+            if (Data.Config.ContainsKey("Password"))
+                Data.Config["Password"] = string.Empty;
+
+            Data.SaveConfig();
         }
         #endregion
     }

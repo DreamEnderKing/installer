@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using COSXML.Auth;
 
 namespace installer.Model
 {
@@ -20,7 +21,15 @@ namespace installer.Model
     class EEsast
     {
         public enum language { cpp, py };
-        public string Token { get; protected set; }
+        private string token;
+        public string Token { get => token; protected set
+            {
+                if (token != value)
+                    Token_Changed.Invoke(this, new EventArgs());
+                token = value;
+            }
+        }
+        public event EventHandler Token_Changed;
         public string ID { get; protected set; }
         public string Email { get; protected set; }
 
@@ -29,10 +38,11 @@ namespace installer.Model
         {
             disconnected, offline, logined
         }
-        public WebStatus Status;
-        async public Task LoginToEEsast(HttpClient client, string useremail, string userpassword)
+        public WebStatus Status = WebStatus.disconnected;
+        public Tencent_Cos EEsast_Cos { get; protected set; }
+        public async Task LoginToEEsast(HttpClient client, string useremail, string userpassword)
         {
-            string token;
+            EEsast_Cos = new Tencent_Cos("1255334966", "ap-beijing", "eesast");
             try
             {
                 using (var response = await client.PostAsync("https://api.eesast.com/users/login", JsonContent.Create(new
@@ -80,17 +90,18 @@ namespace installer.Model
         /// <returns>-1:tokenFail;-2:FileNotExist;-3:CosFail;-4:loginTimeout;-5:Fail;-6:ReadFileFail;-7:networkError</returns>
         async public Task<int> UploadFiles(HttpClient client, string tarfile, string type, string plr)    //用来上传文件
         {
-            if (!ReadToken())   //读取token失败
+            if (Status != WebStatus.logined)   // 
             {
+                Exceptions.Append(new UnauthorizedAccessException("用户未登录"));
                 return -1;
             }
             try
             {
                 string content;
-                client.DefaultRequestHeaders.Authorization = new("Bearer", logintoken);
+                client.DefaultRequestHeaders.Authorization = new("Bearer", Token);
                 if (!File.Exists(tarfile))
                 {
-                    //Console.WriteLine("文件不存在！");
+                    Exceptions.Append(new IOException("用户不存在"));
                     return -2;
                 }
                 using FileStream fs = new FileStream(tarfile, FileMode.Open, FileAccess.Read);
@@ -102,16 +113,7 @@ namespace installer.Model
                     switch (response.StatusCode)
                     {
                         case System.Net.HttpStatusCode.OK:
-
                             var res = Helper.DeserializeJson1<Dictionary<string, string>>(await response.Content.ReadAsStringAsync());
-                            string appid = "1255334966";                    // 设置腾讯云账户的账户标识（APPID）
-                            string region = "ap-beijing";                   // 设置一个默认的存储桶地域
-                            CosXmlConfig config = new CosXmlConfig.Builder()
-                                                      .IsHttps(true)        // 设置默认 HTTPS 请求
-                                                      .SetAppid(appid)      // 设置腾讯云账户的账户标识 APPID
-                                                      .SetRegion(region)    // 设置一个默认的存储桶地域
-                                                      .SetDebugLog(true)    // 显示日志
-                                                      .Build();             // 创建 CosXmlConfig 对象
                             string tmpSecretId = res["TmpSecretId"];        //"临时密钥 SecretId";
                             string tmpSecretKey = res["TmpSecretKey"];      //"临时密钥 SecretKey";
                             string tmpToken = res["SecurityToken"];         //"临时密钥 token";
@@ -119,39 +121,11 @@ namespace installer.Model
                             QCloudCredentialProvider cosCredentialProvider = new DefaultSessionQCloudCredentialProvider(
                                 tmpSecretId, tmpSecretKey, tmpExpiredTime, tmpToken
                             );
-                            // 初始化 CosXmlServer
-                            CosXmlServer cosXml = new CosXmlServer(config, cosCredentialProvider);
+                            EEsast_Cos.UpdateSecret(cosCredentialProvider);
 
-                            // 初始化 TransferConfig
-                            TransferConfig transferConfig = new TransferConfig();
-
-                            // 初始化 TransferManager
-                            TransferManager transferManager = new TransferManager(cosXml, transferConfig);
-
-                            string bucket = "eesast-1255334966"; //存储桶，格式：BucketName-APPID
-                            string cosPath = $"/THUAI6/{GetTeamId()}/{type}/{plr}"; //对象在存储桶中的位置标识符，即称对象键
+                            string cosPath = $"/THUAI7/{GetTeamId()}/{type}/{plr}"; //对象在存储桶中的位置标识符，即称对象键
                             string srcPath = tarfile;//本地文件绝对路径
-
-                            // 上传对象
-                            COSXMLUploadTask uploadTask = new COSXMLUploadTask(bucket, cosPath);
-                            uploadTask.SetSrcPath(srcPath);
-
-                            uploadTask.progressCallback = delegate (long completed, long total)
-                            {
-                                //Console.WriteLine(string.Format("progress = {0:##.##}%", completed * 100.0 / total));
-                            };
-
-                            try
-                            {
-                                COSXMLUploadTask.UploadTaskResult result = await transferManager.UploadAsync(uploadTask);
-                                //Console.WriteLine(result.GetResultInfo());
-                                string eTag = result.eTag;
-                                //到这里应该是成功了，但是因为我没有试过，也不知道具体情况，可能还要根据result的内容判断
-                            }
-                            catch (Exception)
-                            {
-                                return -3;
-                            }
+                            EEsast_Cos.UploadFileAsync(srcPath, cosPath).Wait();
 
                             break;
                         case System.Net.HttpStatusCode.Unauthorized:
@@ -178,18 +152,16 @@ namespace installer.Model
 
         async public Task UserDetails(HttpClient client)  // 用来测试访问网站
         {
-            if (!ReadToken())  // 读取token失败
+            if (Status != WebStatus.logined)  // 读取token失败
             {
+                Exceptions.Append(new UnauthorizedAccessException("用户未登录"));
                 return;
             }
             try
             {
-                client.DefaultRequestHeaders.Authorization = new("Bearer", logintoken);
-                Console.WriteLine(logintoken);
-                using (var response = await client.GetAsync("https://api.eesast.com/application/info"))  // JsonContent.Create(new
-                                                                                                         //{
-
-                //})))
+                client.DefaultRequestHeaders.Authorization = new("Bearer", Token);
+                Console.WriteLine(Token);
+                using (var response = await client.GetAsync("https://api.eesast.com/application/info"))
                 {
                     switch (response.StatusCode)
                     {
@@ -213,167 +185,6 @@ namespace installer.Model
             }
         }
 
-        public void SaveToken()  // 保存token
-        {
-            string savepath = System.IO.Path.Combine(Data.dataPath, "THUAI6.json");
-            try
-            {
-                string json;
-                Dictionary<string, string> dict = new Dictionary<string, string>();
-                using FileStream fs = new FileStream(savepath, FileMode.OpenOrCreate, FileAccess.ReadWrite);
-                using (StreamReader r = new StreamReader(fs))
-                {
-                    json = r.ReadToEnd();
-                    if (json == null || json == "")
-                    {
-                        json += @"{""THUAI6""" + ":" + @"""2023""}";
-                    }
-                    dict = Utils.DeserializeJson1<Dictionary<string, string>>(json);
-                    if (dict.ContainsKey("token"))
-                    {
-                        dict.Remove("token");
-                    }
-                    dict.Add("token", logintoken);
-                }
-                using FileStream fs2 = new FileStream(savepath, FileMode.OpenOrCreate, FileAccess.ReadWrite);
-                using StreamWriter sw = new StreamWriter(fs2);
-                fs2.SetLength(0);
-                sw.Write(JsonConvert.SerializeObject(dict));   //将token写入文件
-            }
-            catch (DirectoryNotFoundException)
-            {
-                Console.WriteLine("保存token时未找到下载器地址！请检查下载器是否被移动！");
-            }
-            catch (PathTooLongException)
-            {
-                Console.WriteLine("下载器的路径名太长！请尝试移动下载器！");
-            }
-            catch (ArgumentNullException)
-            {
-                Console.WriteLine("下载器路径初始化失败！");
-            }
-            catch (IOException)
-            {
-                Console.WriteLine("写入token.dat发生冲突！请检查token.dat是否被其它程序占用！");
-            }
-        }
-
-        public static int WriteJson(string key, string data)
-        {
-            try
-            {
-                string savepath = System.IO.Path.Combine(Data.dataPath, "THUAI6.json");
-                FileStream fs = new FileStream(savepath, FileMode.Open, FileAccess.ReadWrite);
-                StreamReader sr = new StreamReader(fs);
-                string json = sr.ReadToEnd();
-                if (json == null || json == "")
-                {
-                    json += @"{""THUAI6""" + ":" + @"""2023""}";
-                }
-                Dictionary<string, string> dict = new Dictionary<string, string>();
-                dict = Utils.DeserializeJson1<Dictionary<string, string>>(json);
-                if (!dict.ContainsKey(key))
-                {
-                    dict.Add(key, data);
-                }
-                else
-                {
-                    dict[key] = data;
-                }
-                sr.Close();
-                fs.Close();
-                FileStream fs2 = new FileStream(savepath, FileMode.Open, FileAccess.ReadWrite);
-                StreamWriter sw = new StreamWriter(fs2);
-                sw.WriteLine(JsonConvert.SerializeObject(dict));
-                sw.Close();
-                fs2.Close();
-                return 0;//成功
-            }
-            catch
-            {
-                return -1;//失败
-            }
-        }
-
-        public static string? ReadJson(string key)
-        {
-            try
-            {
-                string savepath = System.IO.Path.Combine(Data.dataPath, "THUAI6.json");
-                FileStream fs = new FileStream(savepath, FileMode.Open, FileAccess.Read);
-                StreamReader sr = new StreamReader(fs);
-                string json = sr.ReadToEnd();
-                Dictionary<string, string> dict = new Dictionary<string, string>();
-                if (json == null || json == "")
-                {
-                    json += @"{""THUAI6""" + ":" + @"""2023""}";
-                }
-                dict = Utils.DeserializeJson1<Dictionary<string, string>>(json);
-                fs.Close();
-                sr.Close();
-                return dict[key];
-
-            }
-            catch
-            {
-                return null;  //文件不存在或者已被占用
-            }
-        }
-
-        public bool ReadToken()  // 读取token
-        {
-            try
-            {
-                string json;
-                Dictionary<string, string> dict = new Dictionary<string, string>();
-                string savepath = System.IO.Path.Combine(Data.dataPath, "THUAI6.json");
-                using FileStream fs = new FileStream(savepath, FileMode.Open, FileAccess.Read);
-                using StreamReader sr = new StreamReader(fs);
-
-                json = sr.ReadToEnd();
-                if (json == null || json == "")
-                {
-                    json += @"{""THUAI6""" + ":" + @"""2023""}";
-                }
-                dict = Utils.DeserializeJson1<Dictionary<string, string>>(json);
-                if (!dict.ContainsKey("token"))
-                {
-                    return false;
-                }
-                else
-                {
-                    logintoken = dict["token"];
-                    return true;
-                }
-            }
-            catch (DirectoryNotFoundException)
-            {
-                Console.WriteLine("读取token时未找到下载器地址！请检查下载器是否被移动！");
-                return false;
-            }
-            catch (FileNotFoundException)
-            {
-                //没有登陆
-                Console.WriteLine("请先登录！");
-                return false;
-            }
-            catch (PathTooLongException)
-            {
-                Console.WriteLine("下载器的路径名太长！请尝试移动下载器！");
-                return false;
-            }
-            catch (ArgumentNullException)
-            {
-                Console.WriteLine("下载器路径初始化失败！");
-                return false;
-            }
-            catch (IOException)
-            {
-                Console.WriteLine("写入token.dat发生冲突！请检查token.dat是否被其它程序占用！");
-                return false;
-            }
-        }
-
         async public Task<string> GetTeamId()
         {
             var client = new HttpClient();
@@ -384,17 +195,18 @@ namespace installer.Model
             //        ""query"": ""query MyQuery {{contest_team_member(where: {{user_id: {{_eq: \""{Downloader.UserInfo._id}\""}}}}) {{ team_id  }}}}"",
             //        ""variables"": {{}},
             //    }}", null, "application/json");
-            var content = new StringContent("{\"query\":\"query MyQuery {\\r\\n  contest_team_member(where: {user_id: {_eq: \\\"" + Downloader.UserInfo._id + "\\\"}}) {\\r\\n    team_id\\r\\n  }\\r\\n}\",\"variables\":{}}", null, "application/json");
+            var content = new StringContent("{\"query\":\"query MyQuery {\\r\\n  contest_team_member(where: {user_id: {_eq: \\\"" + ID + "\\\"}}) {\\r\\n    team_id\\r\\n  }\\r\\n}\",\"variables\":{}}", null, "application/json");
             request.Content = content;
             var response = await client.SendAsync(request);
             response.EnsureSuccessStatusCode();
             var info = await response.Content.ReadAsStringAsync();
-            var s1 = Utils.DeserializeJson1<Dictionary<string, object>>(info)["data"];
-            var s2 = Utils.DeserializeJson1<Dictionary<string, List<object>>>(s1.ToString() ?? "")["contest_team_member"];
-            var sres = Utils.DeserializeJson1<Dictionary<string, string>>(s2[0].ToString() ?? "")["team_id"];
+            var s1 = Helper.DeserializeJson1<Dictionary<string, object>>(info)["data"];
+            var s2 = Helper.DeserializeJson1<Dictionary<string, List<object>>>(s1.ToString() ?? "")["contest_team_member"];
+            var sres = Helper.DeserializeJson1<Dictionary<string, string>>(s2[0].ToString() ?? "")["team_id"];
             return sres;
         }
-        async public Task<string> GetUserId(string learnNumber)
+
+        public async Task<string> GetUserId(string learnNumber)
         {
             var client = new HttpClient();
             var request = new HttpRequestMessage(HttpMethod.Post, "https://api.eesast.com/dev/v1/graphql");
